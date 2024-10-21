@@ -1,0 +1,3 @@
+[submodule "cookiecutter"]
+	path = cookiecutter
+	url = git@github.com:chisou/cookiecutter-cumulocity-python-ms.git
