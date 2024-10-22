@@ -1,12 +1,11 @@
-FROM python:3.8-slim
+FROM python:3.10-slim
 
 RUN apt-get update && apt-get -y upgrade
 
 COPY requirements.txt /
-COPY c8y_ms /c8y_ms
+COPY main /main
 
 RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
-
-ENTRYPOINT ["python", "-u", "/c8y_ms/main.py"]
+ENTRYPOINT ["python", "-u", "/main/main.py"]

@@ -4,7 +4,7 @@
   "provider": {
     "name": "Software AG"
   },
-  "isolation": "MULTI_TENANT",
+  "isolation": "{ISOLATION}",
   "requiredRoles": [
     "ROLE_INVENTORY_ADMIN",
     "ROLE_INVENTORY_READ",

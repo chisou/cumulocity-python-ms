@@ -1,8 +1,7 @@
-# Copyright (c) 2020 Software AG,
-# Darmstadt, Germany and/or Software AG USA Inc., Reston, VA, USA,
-# and/or its subsidiaries and/or its affiliates and/or their licensors.
-# Use, reproduction, transfer, publication or disclosure is prohibited except
-# as specifically provided for in your License Agreement with Software AG.
+# Copyright (c) 2024 Cumulocity GmbH
+
+import glob
+import os
 import sys
 from datetime import datetime
 from dunamai import Version
@@ -11,8 +10,21 @@ import re
 
 import microservice_util as ms_util
 
-# CHANGE THE MICROSERVICE/APPLICATION NAME HERE
-MICROSERVICE_NAME = 'python-ms'
+
+def read_file(fn):
+    """Read file contents."""
+    with open(fn, 'rt') as fp:
+        return fp.readline().strip()
+
+
+def write_file(fn, text):
+    """Write file contents."""
+    with open(fn, 'wt') as fp:
+        return fp.write(text)
+
+
+MICROSERVICE_NAME = read_file('MICROSERVICE_NAME')
+ISOLATION = read_file('ISOLATION')
 
 
 def resolve_version():
@@ -35,20 +47,29 @@ def resolve_version():
 @task(help={
     'name': "New name of the microservice. Needs to conform to Cumulocity"
             " naming rules.",
+    'isolation': "New isolation level. Needs to be one of MULTI_TENANT or"
+            " SINGLE_TENANT."
 })
-def init(c, name, env=False):
-    """Init the microservice project.
+def init(c, name=None, isolation=None):
+    """Init the microservice project with name and isolation level.
 
     This sets a default microservice name as it should be represented in
-    Cumulocity.
+    Cumulocity as well as the isolation level.
     """
     # (1) Check name pattern (start with a letter followed by any number of
     #     letters, digits and dashes, no underscores)
-    if not re.match(r'[a-zA-Z]+[a-zA-Z0-9\-]+', name):
+    if name and not re.match(r'[a-zA-Z]+[a-zA-Z0-9\-]+', name):
         print(f"Provided name ({name}) does not conform to Cumulocity naming standards.", file=sys.stderr)
         exit(2)
-    c.run(f'sed -i "s/^MICROSERVICE_NAME = .\\+/MICROSERVICE_NAME = \'{name}\'/" tasks.py')
-    print(f'New microservice name written: {name}')
+    if isolation and isolation not in ['MULTI_TENANT', 'PER_TENANT']:
+        print(f"Provided isolation level ({isolation}) is invalid.", file=sys.stderr)
+        exit(2)
+    if name:
+        write_file('MICROSERVICE_NAME', name)
+        print(f'New microservice name written: {name}')
+    if isolation:
+        write_file('ISOLATION', isolation)
+        print(f'New isolation level written: {isolation}')
 
 
 @task
@@ -62,28 +83,36 @@ def show_version(_):
 
 
 @task(help={
-    'scope': ("Which source directory to check, can be one of 'c8y_api', "
-              "'tests', 'integration_tests' or 'all'. Default: 'all'")
+    'scope': "Which source directory to check (e.g. 'main'). Default: 'all'."
 })
 def lint(c, scope='all'):
     """Run PyLint."""
     if scope == 'all':
-        scope = 'c8y_api c8y_tk tests integration_tests samples'
-    c.run(f'pylint {scope}')
+        paths = " ".join([n for n in glob.glob('src/*') if os.path.isdir(n)])
+    else:
+        paths = f'src/{scope}'
+    c.run(f'pylint {paths}')
 
 
 @task(help={
     'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
     "version": "Microservice version. If not provided, defaults to a "
                "generated value based on the last Git tag.",
+    "isolation": "Isolation level, i.e. PER_TENANT or MULTI_TENANT. "
+                 f"Defaults to '{ISOLATION}'."
 })
-def build_ms(c, name=MICROSERVICE_NAME, version=None):
+def build_ms(c, name=MICROSERVICE_NAME, version=None, isolation=ISOLATION):
     """Build a Cumulocity microservice binary for upload.
 
     This will build a ready to deploy Cumulocity microservice from the
     sources.
     """
-    c.run(f'./build.sh {name} {version or resolve_version()}')
+    version = version or resolve_version()
+    # if '-' in version:
+    #     version = version.split('-')[0] + '-b' + BUILD_NO
+    c.run(f'./build.sh {name} {version or resolve_version()} {isolation}')
+    # store new build number
+    # write_file('BUILD_NO', str(int(BUILD_NO) + 1))
 
 
 @task(help={

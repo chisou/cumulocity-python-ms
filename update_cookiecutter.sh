@@ -1,8 +1,14 @@
 #!/bin/bash
 
-$cwd="$(pwd)"
+# Copyright (c) 2024 Cumulocity GmbH
 
-src="$cwd/template"
+# Note: This script updates a cookiecutter template located in a 'cookiecutter'
+# sub directory. There is a corresponding GitHub project which can/should be
+# added as a sub module: https://github.com/chisou/cookiecutter-cumulocity-python-ms
+
+cwd="$(pwd)"
+
+src="$cwd"
 dst="$cwd/cookiecutter/{{cookiecutter.project_slug}}"
 
 function error {
@@ -10,31 +16,9 @@ function error {
   exit 1
 }
 
-
 # (1) copy source files
 echo "Copying source files ..."
-cp -v "$src/requirements*.txt" "$dst" | exit 1
-cp -v "$src/*.py" "$dst" | exit 1
-cp -v "$src/*.md" "$dst" | exit 1
-cp -v "$src/*.sh" "$dst" | exit 1
-cp -v -r "$src/src" "$dst/src" | exit 1
-
-# (2) update template files
-
-#
-
-  {% if cookiecutter.entrypoint == 'Multi-Tenant Microservice' -%}"isolation": "MULTI_TENANT",
-  {% elif cookiecutter.entrypoint == 'Single-Tenant Microservice' -%}"isolation": "PER_TENANT",{% endif -%}
-
-
-
-
-
-requirements.txt
-requirements-dev.txt
-
-tasks.py
-microservice_util.py
-
-build.sh
-src/c8y_ms
+cp -v "$src/requirements"*.txt "$dst" | exit 1
+cp -v "$src/"*.py "$dst" | exit 1
+cp -v "$src/build.sh" "$dst" | exit 1
+cp -v -r "$src/src" "$dst" | exit 1
