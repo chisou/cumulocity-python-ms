@@ -1,11 +1,17 @@
 # Copyright (c) 2024 Cumulocity GmbH
 
 import json
+from contextlib import contextmanager
+from tempfile import NamedTemporaryFile
 
 from dotenv import load_dotenv
 
 from c8y_api.app import SimpleCumulocityApp
 from c8y_api.model import Application
+
+
+
+
 
 
 def register_microservice(name: str):

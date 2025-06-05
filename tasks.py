@@ -2,11 +2,16 @@
 
 import glob
 import os
+import shutil
 import sys
+from contextlib import contextmanager
 from datetime import datetime
+import re
+from tempfile import TemporaryFile, NamedTemporaryFile
+
+import dotenv
 from dunamai import Version
 from invoke import task
-import re
 
 import microservice_util as ms_util
 
@@ -25,6 +30,7 @@ def write_file(fn, text):
 
 MICROSERVICE_NAME = read_file('MICROSERVICE_NAME')
 ISOLATION = read_file('ISOLATION')
+PROVIDER = read_file('PROVIDER')
 
 
 def resolve_version():
@@ -42,6 +48,45 @@ def resolve_version():
     if version.dirty:
         result = result + datetime.now().strftime('-r%y%m%d%H%M')
     return result
+
+
+@contextmanager
+def load_env():
+    c8y_vars = [f'{k}={v}' for k, v in os.environ.items() if k.startswith('C8Y_')]
+    if c8y_vars:
+        print("Found Cumulocity session variables in environment:")
+        for v in c8y_vars:
+            print(f"  {v}")
+    if os.path.isfile('.env'):
+        if c8y_vars:
+            print("WARNING: Local .env file is ignored because environment variables are defined.")
+        else:
+            print("Local .env file found.")
+            dotenv.load_dotenv()
+
+    yield os.environ
+
+
+@task
+def check_env(c, debug=False):
+    with NamedTemporaryFile(mode="tw+", delete=False) as env_file:
+        env_file.close()
+        c8y_vars = [f'{k}={v}' for k, v in os.environ.items() if k.startswith('C8Y_')]
+        if c8y_vars:
+            print("Found Cumulocity session variables in environment:")
+            for v in c8y_vars:
+                print(f"  {v}")
+        write_file(env_file.name, '\n'.join(c8y_vars))
+        if os.path.isfile('.env'):
+            if c8y_vars:
+                print("WARNING: Local .env file is ignored because environment variables are defined.")
+            else:
+                print("Local .env file found.")
+                shutil.copy('.env', env_file.name)
+        c.run(f'docker run -it --rm --name {name} -p {port}:80 --env-file {env_file.name} {name}', pty=True)
+        os.unlink(env_file.name)
+
+    c8y_vars = [f'{k}={v}' for k, v in os.environ.items() if k.startswith('C8Y_')]
 
 
 @task(help={
@@ -100,17 +145,21 @@ def lint(c, scope='all'):
                "generated value based on the last Git tag.",
     "isolation": "Isolation level, i.e. PER_TENANT or MULTI_TENANT. "
                  f"Defaults to '{ISOLATION}'."
+                 "isolation",
+    "provider": "Microservice provider, i.e. 'Cumulocity GmbH'"
+                f"Defaults to '{PROVIDER}'.",
 })
-def build_ms(c, name=MICROSERVICE_NAME, version=None, isolation=ISOLATION):
+def build(c, name=MICROSERVICE_NAME, version=None, isolation=ISOLATION, provider=PROVIDER):
     """Build a Cumulocity microservice binary for upload.
 
     This will build a ready to deploy Cumulocity microservice from the
     sources.
     """
     version = version or resolve_version()
+    # todo: check if name is proper?
     # if '-' in version:
     #     version = version.split('-')[0] + '-b' + BUILD_NO
-    c.run(f'./build.sh {name} {version or resolve_version()} {isolation}')
+    c.run(f'./build.sh -n {name} -v {version} -i {isolation} -p "{provider}"')
     # store new build number
     # write_file('BUILD_NO', str(int(BUILD_NO) + 1))
 
@@ -118,34 +167,31 @@ def build_ms(c, name=MICROSERVICE_NAME, version=None, isolation=ISOLATION):
 @task(help={
     'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
 })
-def register_ms(_, name=MICROSERVICE_NAME):
+def register(_, name=MICROSERVICE_NAME):
     """Register a microservice at Cumulocity."""
-    try:
+    with load_env():
         ms_util.register_microservice(name)
-    except ValueError:
-        print(f"Microservice '{name}' appears to be already registered at Cumulocity.")
 
 
 @task(help={
     'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
 })
-def deregister_ms(_, name=MICROSERVICE_NAME):
+def deregister(_, name=MICROSERVICE_NAME):
     """Deregister a microservice from Cumulocity."""
-    try:
-        ms_util.unregister_microservice(name)
-    except LookupError:
-        print(f"Microservice '{name}' appears not to be registered at Cumulocity.")
+    # todo: needs bootstrapping environment
+    ms_util.unregister_microservice(name)
 
 
 @task(help={
     'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
 })
-def update_ms(_, name=MICROSERVICE_NAME):
+def update(_, name=MICROSERVICE_NAME):
     """Update microservice at Cumulocity."""
-    try:
+    # todo: needs bootstrapping environment
+    with ms_util.load_env():
         ms_util.update_microservice(name)
-    except LookupError:
-        print(f"Microservice '{name}' appears not to be registered at Cumulocity.")
+    # ms_util.load_env(
+
 
 
 @task(help={
@@ -166,8 +212,32 @@ def create_env(_, name=MICROSERVICE_NAME):
     """Create a .env-ms file to hold the credentials of the microservice
     registered at Cumulocity."""
     base_url, tenant, user, password = ms_util.get_bootstrap_credentials(name)
-    with open(f'.env-ms', 'w', encoding='UTF-8') as f:
+    with open(f'.env', 'w', encoding='UTF-8') as f:
         f.write(f'C8Y_BASEURL={base_url}\n'
                 f'C8Y_BOOTSTRAP_TENANT={tenant}\n'
                 f'C8Y_BOOTSTRAP_USER={user}\n'
                 f'C8Y_BOOTSTRAP_PASSWORD={password}\n')
+
+@task(help={
+    'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
+    'port': "Mapped port. Defaults to 8080",
+})
+def run(c, name=MICROSERVICE_NAME, port=8080):
+    """Run the previously build docker image microservice."""
+    with NamedTemporaryFile(mode="tw+", delete=False) as env_file:
+        env_file.close()
+        c8y_vars = [f'{k}={v}' for k, v in os.environ.items() if k.startswith('C8Y_')]
+        if c8y_vars:
+            print("Found Cumulocity session variables in environment:")
+            for v in c8y_vars:
+                print(f"  {v}")
+            print("These variables will be injected into the container.")
+        write_file(env_file.name, '\n'.join(c8y_vars))
+        if os.path.isfile('.env'):
+            if c8y_vars:
+                print("WARNING: Local .env file is ignored because environment variables are defined.")
+            else:
+                print("Local .env file found. Content is injected into the container.")
+                shutil.copy('.env', env_file.name)
+        c.run(f'docker run -it --rm --name {name} -p {port}:80 --env-file {env_file.name} {name}', pty=True)
+        os.unlink(env_file.name)

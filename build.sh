@@ -1,19 +1,75 @@
 #!/bin/bash
 # Copyright (c) 2024 Cumulocity GmbH
 
-NAME="$1"
-VERSION="$2"
-ISOLATION="$3"
-IMG_NAME=`echo "$NAME" | tr '[:upper:]' '[:lower:]' | tr '[:punct:]' '-'`
+name=""
+version=""
+isolation=""
+provider=""
 
-BUILD_DIR="./build"
-DIST_DIR="./dist"
-TARGET="$DIST_DIR/$IMG_NAME.zip"
+while [[ $# -gt 0 ]]; do
+  # options
+  case "$1" in
+    -h|--help)
+      echo "Usage: build.sh -n <name> -v <version> -i <isolation> -p <provider>"
+      exit 0
+      ;;
+  esac
+  # arguments
+  if [[ -z "$2" || "$2" == -* ]]; then
+    echo "Parameter $1 needs an argument."
+    exit 2
+  fi
+  case "$1" in
+    -n|--name)
+      name="$2"
+      shift 2
+      ;;
+    -v|--version)
+      version="$2"
+      shift 2
+      ;;
+    -i|--isolation)
+      isolation="$2"
+      shift 2
+      ;;
+    -p|--provider)
+      provider="$2"
+      shift 2
+      ;;
+  esac
+done
 
-echo "Name: $NAME, Image Name: $IMG_NAME, Version: $VERSION"
-echo "Build directory: $BUILD_DIR"
-echo "Dist directory:  $DIST_DIR"
-echo "Target location: $TARGET"
+
+if [ -z "$name" ]; then
+  echo "Missing name parameter (-n/--name)."
+  exit 2
+fi
+
+if [ -z "$version" ]; then
+  echo "Missing version parameter (-v/--version)."
+  exit 2
+fi
+
+if [ -z "$isolation" ]; then
+  echo "Missing isolation parameter (-i/--isolation)."
+  exit 2
+fi
+
+if [ -z "$provider" ]; then
+  echo "Missing provider parameter (-p/--provider)."
+  exit 2
+fi
+
+img_name=`echo "$name" | tr '[:upper:]' '[:lower:]' | tr '[:punct:]' '-'`
+
+build_dir="./build"
+dist_dir="./dist"
+target="$dist_dir/$img_name.zip"
+
+echo "Name: $name, Image Name: $img_name, Version: $version, Isolation: $isolation, Provider: $provider"
+echo "Build directory: $build_dir"
+echo "Dist directory:  $dist_dir"
+echo "Target location: $target"
 echo ""
 
 if ! [[ -d "src" ]]; then
@@ -22,23 +78,25 @@ if ! [[ -d "src" ]]; then
 fi
 
 # prepare directories
-[[ -d "$BUILD_DIR" ]] && rm -rf "$BUILD_DIR"
-mkdir -p "$BUILD_DIR"
-[[ -d "$DIST_DIR" ]] && rm -rf "$DIST_DIR"
-mkdir -p "$DIST_DIR"
+[[ -d "$build_dir" ]] && rm -rf "$build_dir"
+mkdir -p "$build_dir"
+[[ -d "$dist_dir" ]] && rm -rf "$dist_dir"
+mkdir -p "$dist_dir"
 
 # copy & render sources
-cp ./requirements.txt "$BUILD_DIR"
-cp -r src/main "$BUILD_DIR"
-sed -e "s/{VERSION}/$VERSION/g" ./src/cumulocity.json > "$BUILD_DIR/cumulocity.json"
-sed -e "s/{ISOLATION}/$ISOLATION/g" ./src/cumulocity.json > "$BUILD_DIR/cumulocity.json"
-sed -e "s/{SAMPLE}/$NAME/g" ./src/Dockerfile > "$BUILD_DIR/Dockerfile"
+cp ./requirements.txt "$build_dir"
+cp -r src/main "$build_dir"
+cp ./src/cumulocity.json "$build_dir/cumulocity.json"
+cp ./src/Dockerfile "$build_dir/Dockerfile"
+sed -i -e "s/{VERSION}/$version/g" "$build_dir/cumulocity.json"
+sed -i -e "s/{ISOLATION}/$isolation/g" "$build_dir/cumulocity.json"
+sed -i -e "s/{PROVIDER}/$provider/g" "$build_dir/cumulocity.json"
 
 # build image
 echo "Building image ..."
-docker build -t "$NAME" "$BUILD_DIR"
-docker save -o "$DIST_DIR/image.tar" "$NAME"
-zip -j "$DIST_DIR/$IMG_NAME.zip" "$BUILD_DIR/cumulocity.json" "$DIST_DIR/image.tar"
+docker build -t "$name" "$build_dir"
+docker save -o "$dist_dir/image.tar" "$name"
+zip -j "$dist_dir/$img_name.zip" "$build_dir/cumulocity.json" "$dist_dir/image.tar"
 
 echo ""
-echo "Created uploadable archive: $TARGET"
+echo "Created uploadable archive: $target"
