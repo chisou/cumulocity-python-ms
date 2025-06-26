@@ -60,6 +60,7 @@ if [ -z "$provider" ]; then
   exit 2
 fi
 
+architecture=$(uname -m)
 img_name=`echo "$name" | tr '[:upper:]' '[:lower:]' | tr '[:punct:]' '-'`
 
 build_dir="./build"
@@ -70,6 +71,7 @@ echo "Name: $name, Image Name: $img_name, Version: $version, Isolation: $isolati
 echo "Build directory: $build_dir"
 echo "Dist directory:  $dist_dir"
 echo "Target location: $target"
+echo "Architecture:    $architecture"
 echo ""
 
 if ! [[ -d "src" ]]; then
@@ -94,8 +96,13 @@ sed -i -e "s/{PROVIDER}/$provider/g" "$build_dir/cumulocity.json"
 
 # build image
 echo "Building image ..."
-docker build -t "$name" "$build_dir"
-docker save -o "$dist_dir/image.tar" "$name"
+if [[ architecture == "amd64" ]]; then
+  platforms="linux/amd64"
+else
+  platforms="linux/$architecture,linux/amd64"
+fi
+docker buildx build --platform "$platforms" -t "$name" "$build_dir"
+docker save --platform=linux/amd64 -o "$dist_dir/image.tar" "$name"
 zip -j "$dist_dir/$img_name.zip" "$build_dir/cumulocity.json" "$dist_dir/image.tar"
 
 echo ""
