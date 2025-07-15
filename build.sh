@@ -94,15 +94,16 @@ sed -i -e "s/{VERSION}/$version/g" "$build_dir/cumulocity.json"
 sed -i -e "s/{ISOLATION}/$isolation/g" "$build_dir/cumulocity.json"
 sed -i -e "s/{PROVIDER}/$provider/g" "$build_dir/cumulocity.json"
 
-# build image
-echo "Building image ..."
-if [[ architecture == "amd64" ]]; then
-  platforms="linux/amd64"
-else
-  platforms="linux/$architecture,linux/amd64"
+if [[ architecture != "amd64" ]]; then
+  echo "Building image ($architecture) ..."
+  docker build --platform "linux/$architecture" -t "$name:latest-$architecture" "$build_dir"
 fi
-docker buildx build --platform "$platforms" -t "$name" "$build_dir"
-docker save --platform=linux/amd64 -o "$dist_dir/image.tar" "$name"
+
+
+# build image
+echo "Building image (amd64) ..."
+docker build  --platform linux/amd64  -t "$name:latest-amd64" "$build_dir"
+docker save -o "$dist_dir/image.tar" "$name:latest-amd64"
 zip -j "$dist_dir/$img_name.zip" "$build_dir/cumulocity.json" "$dist_dir/image.tar"
 
 echo ""
