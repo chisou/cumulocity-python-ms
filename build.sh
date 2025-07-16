@@ -68,10 +68,9 @@ dist_dir="./dist"
 target="$dist_dir/$img_name.zip"
 
 echo "Name: $name, Image Name: $img_name, Version: $version, Isolation: $isolation, Provider: $provider"
-echo "Build directory: $build_dir"
-echo "Dist directory:  $dist_dir"
-echo "Target location: $target"
-echo "Architecture:    $architecture"
+echo "Build directory:    $build_dir"
+echo "Target location:    $target"
+echo "Host Architecture:  $architecture"
 echo ""
 
 if ! [[ -d "src" ]]; then
@@ -94,16 +93,11 @@ sed -i -e "s/{VERSION}/$version/g" "$build_dir/cumulocity.json"
 sed -i -e "s/{ISOLATION}/$isolation/g" "$build_dir/cumulocity.json"
 sed -i -e "s/{PROVIDER}/$provider/g" "$build_dir/cumulocity.json"
 
-if [[ architecture != "amd64" ]]; then
-  echo "Building image ($architecture) ..."
-  docker build --platform "linux/$architecture" -t "$name:latest-$architecture" "$build_dir"
-fi
-
-
 # build image
 echo "Building image (amd64) ..."
-docker build  --platform linux/amd64  -t "$name:latest-amd64" "$build_dir"
-docker save -o "$dist_dir/image.tar" "$name:latest-amd64"
+export DOCKER_DEFAULT_PLATFORM=linux/amd64
+docker build -t "$name" "$build_dir"
+docker save -o "$dist_dir/image.tar" "$name"
 zip -j "$dist_dir/$img_name.zip" "$build_dir/cumulocity.json" "$dist_dir/image.tar"
 
 echo ""
