@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from http.client import HTTPConnection
 import logging
 import os
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from dotenv import load_dotenv
 from flask import Flask, request, jsonify
-from http.client import HTTPConnection
 
 from c8y_api._base_api import UnauthorizedError
 from c8y_api.app import MultiTenantCumulocityApp
