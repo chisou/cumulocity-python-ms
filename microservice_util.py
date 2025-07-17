@@ -1,21 +1,18 @@
 # Copyright (c) 2024 Cumulocity GmbH
 
 import json
-from contextlib import contextmanager
-from tempfile import NamedTemporaryFile
+import logging
 
 from dotenv import load_dotenv
 
 from c8y_api.app import SimpleCumulocityApp
 from c8y_api.model import Application
 
-
-
-
+logger = logging.getLogger()
 
 
 def register_microservice(name: str):
-    """ Register a microservice at Cumulocity.
+    """ (Re-) register a microservice at Cumulocity.
 
     The Cumulocity connection information is taken from the environment
     .env file located in the working directory.
@@ -23,30 +20,45 @@ def register_microservice(name: str):
     Args:
         name (str):  The application name to use
     """
+    logger.info(f"Registering microservice '{name}'.")
+
     load_dotenv()
     c8y = SimpleCumulocityApp()
 
-    # Verify this application is not registered, yet
-    if c8y.applications.get_all(name=name):
-        raise ValueError(f"Microservice application named '{name}' seems to be already registered.")
+    apps = c8y.applications.get_all(name=name)
 
     # parse microservice manifest
     with open('./src/cumulocity.json') as fp:
         manifest_json = json.load(fp)
-
-    # Create application stub in Cumulocity
     required_roles = manifest_json['requiredRoles']
-    app = Application(c8y, name=name, key=f'{name}-key',
-                      type=Application.MICROSERVICE_TYPE,
-                      availability=Application.PRIVATE_AVAILABILITY,
-                      required_roles=required_roles)
-    app = app.create()
+    logger.info(f"Microservice roles: {', '.join(required_roles)}.")
+
+    # (2) update already existing
+    if apps:
+        app = apps[0]
+        if set(app.required_roles) == set(required_roles):
+            logger.info(f"Microservice application '{name}' (ID {app.id}) already up to date.")
+        else:
+            app.required_roles = required_roles
+            app.update()
+            logger.info(f"Microservice application '{name}' (ID {app.id}) updated.")
+        return
+
+    # (3) create new applications stub
+    app = Application(
+        c8y,
+        name=name,
+        key=f'{name}-key',
+        type=Application.MICROSERVICE_TYPE,
+        availability=Application.PRIVATE_AVAILABILITY,
+        required_roles=required_roles
+    ).create()
 
     # Subscribe to newly created microservice
     subscription_json = {'application': {'self': f'{c8y.base_url}/application/applications/{app.id}'}}
     c8y.post(f'/tenant/tenants/{c8y.tenant_id}/applications', json=subscription_json)
 
-    print(f"Microservice application '{name}' (ID {app.id}) created. Tenant '{c8y.tenant_id}' subscribed.")
+    logger.info(f"Microservice application '{name}' (ID {app.id}) created. Tenant '{c8y.tenant_id}' subscribed.")
 
 
 def unregister_microservice(name: str):
@@ -75,7 +87,7 @@ def unregister_microservice(name: str):
     print(f"Microservice application '{name}' (ID {app.id}) deleted.")
 
 
-def update_microservice(name: str):
+def upload_microservice(name: str, file: str):
     """ Update a microservice at Cumulocity.
 
     The Cumulocity connection information is taken from the environment
@@ -83,29 +95,18 @@ def update_microservice(name: str):
 
     Args:
         name (str):  The name of the application to use
-
-    Throws:
-        LookupError  if a corresponding application cannot be found.
+        file (str):  The filename of the packed (.zip) application image
     """
     load_dotenv()
-
+    c8y = SimpleCumulocityApp()
     try:
-        c8y = SimpleCumulocityApp()
-        # read applications by name, will throw IndexError if there is none
         app = c8y.applications.get_all(name=name)[0]
-        # parse microservice manifest
-        with open('./src/cumulocity.json') as fp:
-            manifest_json = json.load(fp)
+        logger.info(f"Uploading binary for microservice '{name}' (ID {app.id}) ...")
+        c8y.applications.upload_attachment(app.id, file)
+        logger.info("Microservice binary uploaded successfully.")
 
-        # Create application stub in Cumulocity
-        required_roles = manifest_json['requiredRoles']
-        app.required_roles = required_roles
-        app.update()
     except IndexError as e:
-        raise LookupError(f"Cannot retrieve information for an application named '{name}'.") from e
-
-    print(f"Microservice application '{name}' (ID {app.id}) updated. "
-          f"New roles: {', '.join(required_roles)}.")
+        raise RuntimeError(f"Cannot retrieve information for an application named '{name}'.") from e
 
 
 def get_bootstrap_credentials(name: str) -> (str, str):
