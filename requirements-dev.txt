@@ -1,3 +1,0 @@
-dunamai
-invoke
-pylint

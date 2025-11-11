@@ -126,10 +126,10 @@ def load_env():
     'name': "New name of the microservice. Needs to conform to Cumulocity"
             " naming rules.",
     'isolation': "New isolation level. Needs to be one of MULTI_TENANT or"
-            " SINGLE_TENANT.",
+            " PER¶_TENANT.",
     'loglevel': "Log level. Can be one of: debug, info, warning, error. Defaults to 'info'.",
 })
-def init(_, name, isolation, loglevel="info"):
+def init(_, name=None, isolation=None, loglevel="info"):
     """Init the microservice project with name and isolation level.
 
     This sets a default microservice name as it should be represented in
@@ -137,7 +137,9 @@ def init(_, name, isolation, loglevel="info"):
     """
     init_logging(loglevel)
     # Check name pattern (start with a letter followed by any number of letters, digits and dashes, no underscores)
+    name = name or input(f"Enter new name for microservice ({MICROSERVICE_NAME}): ") or MICROSERVICE_NAME
     assert_name(name)
+    isolation = isolation or input(f"Enter microservice isolation level ({ISOLATION}): ") or ISOLATION
     assert_isolation(isolation)
     write_file('MICROSERVICE_NAME', name)
     logger.info(f'New microservice name written: {name}')
@@ -172,14 +174,9 @@ def lint(c, scope='all'):
     'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
     "version": "Microservice version. If not provided, defaults to a "
                "generated value based on the last Git tag.",
-    "isolation": "Isolation level, i.e. PER_TENANT or MULTI_TENANT. "
-                 f"Defaults to '{ISOLATION}'."
-                 "isolation",
-    "provider": "Microservice provider, i.e. 'Cumulocity GmbH'"
-                f"Defaults to '{PROVIDER}'.",
     'loglevel': "Log level. Can be one of: debug, info, warning, error. Defaults to 'info'.",
 })
-def build(c, version=None, name=MICROSERVICE_NAME, isolation=ISOLATION, provider=PROVIDER, loglevel="info"):
+def build(c, version=None, name=MICROSERVICE_NAME, loglevel="info"):
     """Build a Cumulocity microservice binary for upload.
 
     This will build a ready to deploy Cumulocity microservice from the
@@ -187,9 +184,9 @@ def build(c, version=None, name=MICROSERVICE_NAME, isolation=ISOLATION, provider
     """
     init_logging(loglevel)
     assert_name(name)
-    assert_isolation(isolation)
+    assert_isolation(ISOLATION)
     version = version or resolve_version()
-    c.run(f'./build.sh -n {name} -v {version} -i {isolation} -p "{provider}"')
+    c.run(f'./build.sh -n {name} -v {version} -i {ISOLATION} -p "{PROVIDER}"')
 
 
 @task(help={
@@ -217,14 +214,23 @@ def deregister(_, name=MICROSERVICE_NAME, loglevel='info'):
 @task(
     help={
         'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
+        "version": "Microservice version. If not provided, defaults to a "
+                   "generated value based on the last Git tag.",
         'loglevel': "Log level. Can be one of: debug, info, warning, error. Defaults to 'info'.",
 })
-def upload(_, name=MICROSERVICE_NAME, loglevel='info'):
-    """Upload microservice to Cumulocity."""
+def upload(c, version=None, name=MICROSERVICE_NAME, loglevel='info'):
+    """Build, and upload microservice to Cumulocity."""
     init_logging(loglevel)
+    build(c, version=version, name=name, loglevel=loglevel)
     with load_env():
         ms_util.register_microservice(name)
         ms_util.upload_microservice(name, f"dist/{name}.zip")
+
+
+
+@task
+def run(c):
+    c.run('python src/main/main.py')
 
 
 @task(help={
@@ -244,26 +250,19 @@ def print_env(_, name=MICROSERVICE_NAME, loglevel='info'):
 
 @task(help={
     'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
-    'file': "Force custom environment variables file name; By default .env or .env-ms is used.",
+    'file': "Force custom environment variables file name; By default .env-ms is used.",
     'loglevel': "Log level. Can be one of: debug, info, warning, error. Defaults to 'info'.",
 })
-def write_env(_, name=MICROSERVICE_NAME, file=None, loglevel='info'):
+def write_env(_, name=MICROSERVICE_NAME, file=".env-ms", loglevel='info'):
     """Create a .env file to hold the credentials of the microservice
     registered at Cumulocity."""
     init_logging(loglevel)
     with load_env():
         base_url, tenant, user, password = ms_util.get_bootstrap_credentials(name)
-        if not file:
-            filename = ".env"
-            if os.path.isfile(filename):
-                logger.warning(f"Standard environment file ({filename}) already existing. Using .env-ms instead.\n"
-                               "PLEASE ADJUST LOCAL RUNNERS ACCORDINGLY")
-                filename = ".env-ms"
-        else:
-            filename = file
-        logger.info(f"Writing microservice environment variables to file: {filename}")
-        with open(filename, 'w', encoding='UTF-8') as f:
+        logger.info(f"Writing microservice environment variables to file: {file}")
+        with open(file, 'w', encoding='UTF-8') as f:
+            bootstrap = 'BOOTSTRAP_' if ISOLATION == 'MULTI_TENANT' else ''
             f.write(f'C8Y_BASEURL={base_url}\n'
-                    f'C8Y_BOOTSTRAP_TENANT={tenant}\n'
-                    f'C8Y_BOOTSTRAP_USER={user}\n'
-                    f'C8Y_BOOTSTRAP_PASSWORD={password}\n')
+                    f'C8Y_{bootstrap}TENANT={tenant}\n'
+                    f'C8Y_{bootstrap}USER={user}\n'
+                    f'C8Y_{bootstrap}PASSWORD={password}\n')

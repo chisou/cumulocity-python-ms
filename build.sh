@@ -85,7 +85,7 @@ mkdir -p "$build_dir"
 mkdir -p "$dist_dir"
 
 # copy & render sources
-cp ./requirements.txt "$build_dir"
+cp ./requirements-ms.txt "$build_dir/requirements.txt"
 cp -r src/main "$build_dir"
 cp ./src/cumulocity.json "$build_dir/cumulocity.json"
 cp ./src/Dockerfile "$build_dir/Dockerfile"
@@ -95,8 +95,9 @@ sed -i -e "s/{PROVIDER}/$provider/g" "$build_dir/cumulocity.json"
 
 # build image
 echo "Building image (amd64) ..."
-export DOCKER_DEFAULT_PLATFORM=linux/amd64
-docker build -t "$name" "$build_dir"
+#export DOCKER_DEFAULT_PLATFORM=linux/amd64
+#docker build -t "$name" "$build_dir"
+docker buildx build --platform linux/amd64 -t "$name" "$build_dir"
 docker save -o "$dist_dir/image.tar" "$name"
 zip -j "$dist_dir/$img_name.zip" "$build_dir/cumulocity.json" "$dist_dir/image.tar"
 

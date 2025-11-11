@@ -2,6 +2,3 @@ c8y-api
 flask
 apscheduler
 python-dotenv
-dunamai
-invoke
-pylint

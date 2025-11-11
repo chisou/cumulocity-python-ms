@@ -1,8 +1,9 @@
 FROM python:3.11-slim
 
-RUN apt-get update && apt-get -y upgrade
+RUN apt-get update
+RUN apt-get -y upgrade
 
-COPY requirements.txt /
+COPY requirements.txt /requirements.txt
 COPY main /main
 
 RUN pip install --upgrade pip
