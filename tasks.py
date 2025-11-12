@@ -233,14 +233,26 @@ def run(c):
     c.run('python src/main/main.py')
 
 
+def get_env(name, isolation):
+    """Obtain the microservice's environment variables."""
+    # TODO: Do something if not registered, yet
+    if isolation == 'PER_TENANT':
+        return ms_util.get_service_credentials(name)
+    elif isolation == 'MULTI_TENANT':
+        return ms_util.get_bootstrap_credentials(name)
+
+    raise ValueError(f"Unknown isolation: '{isolation}'")
+
+
 @task(help={
     'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
+    'isolation': f"ISOLATION mode. Defaults to '{ISOLATION}'.",
     'loglevel': "Log level. Can be one of: debug, info, warning, error. Defaults to 'info'.",
 })
-def print_env(_, name=MICROSERVICE_NAME, loglevel='info'):
+def print_env(_, name=MICROSERVICE_NAME, isolation=ISOLATION, loglevel='info'):
     """Read and print credentials of registered microservice."""
     init_logging(loglevel)
-    _, tenant, user, password = ms_util.get_bootstrap_credentials(name)
+    _, tenant, user, password = get_env(name, isolation)
     logging.info(
         f"Tenant:    {tenant}\n"
         f"Username:  {user}\n"
@@ -250,15 +262,16 @@ def print_env(_, name=MICROSERVICE_NAME, loglevel='info'):
 
 @task(help={
     'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
+    'isolation': f"ISOLATION mode. Defaults to '{ISOLATION}'.",
     'file': "Force custom environment variables file name; By default .env-ms is used.",
     'loglevel': "Log level. Can be one of: debug, info, warning, error. Defaults to 'info'.",
 })
-def write_env(_, name=MICROSERVICE_NAME, file=".env-ms", loglevel='info'):
+def write_env(_, name=MICROSERVICE_NAME, isolation=ISOLATION, file=".env-ms", loglevel='info'):
     """Create a .env file to hold the credentials of the microservice
     registered at Cumulocity."""
     init_logging(loglevel)
     with load_env():
-        base_url, tenant, user, password = ms_util.get_bootstrap_credentials(name)
+        base_url, tenant, user, password = get_env(name, isolation)
         logger.info(f"Writing microservice environment variables to file: {file}")
         with open(file, 'w', encoding='UTF-8') as f:
             bootstrap = 'BOOTSTRAP_' if ISOLATION == 'MULTI_TENANT' else ''
@@ -266,3 +279,4 @@ def write_env(_, name=MICROSERVICE_NAME, file=".env-ms", loglevel='info'):
                     f'C8Y_{bootstrap}TENANT={tenant}\n'
                     f'C8Y_{bootstrap}USER={user}\n'
                     f'C8Y_{bootstrap}PASSWORD={password}\n')
+

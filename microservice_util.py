@@ -3,6 +3,7 @@
 import json
 import logging
 
+from c8y_api import CumulocityRestApi
 from dotenv import load_dotenv
 
 from c8y_api.app import SimpleCumulocityApp
@@ -115,11 +116,13 @@ def get_bootstrap_credentials(name: str) -> (str, str):
     The Cumulocity connection information is taken from environment files
     (.env and .env-SAMPLE-NAME) located in the working directory.
 
+    Note: this function is only applicable to _multi-tenant_ microservices.
+
     Args:
         name (str):  The name of the application to use
 
     Returns:
-        A pair (username, password) for the credentials.
+        A tuple (baseurl, tenant_id, username, password) for the credentials.
 
     Throws:
         LookupError  if a corresponding application cannot be found.
@@ -136,3 +139,36 @@ def get_bootstrap_credentials(name: str) -> (str, str):
     # read bootstrap user details
     user_json = c8y.get(f'/application/applications/{app.id}/bootstrapUser')
     return c8y.base_url, user_json['tenant'], user_json['name'], user_json['password']
+
+
+def get_service_credentials(name: str) -> (str, str):
+    """ Get the service user credentials of a registered microservice.
+
+    The Cumulocity connection information is taken from environment files
+    (.env and .env-SAMPLE-NAME) located in the working directory.
+
+    Note: this function is only applicable to _per tenant_ microservices.
+
+    Args:
+        name (str):  The name of the application to use
+
+    Returns:
+        A tuple (baseurl, tenant_id, username, password) for the credentials.
+
+    Throws:
+        LookupError  if a corresponding application cannot be found.
+    """
+    load_dotenv()
+    c8y = SimpleCumulocityApp()
+
+    try:
+        # read bootstrap user
+        _, tenant_id, username, password = get_bootstrap_credentials(name)
+        # read subscriptions, there should only be one for simple microservices
+        bootstrap_c8y = CumulocityRestApi(base_url=c8y.base_url, tenant_id=tenant_id, username=username, password=password)
+        subscriptions_json = bootstrap_c8y.get('/application/currentApplication/subscriptions')
+        service_user = subscriptions_json['users'][0]
+        return c8y.base_url, service_user['tenant'], service_user['name'], service_user['password']
+
+    except IndexError as e:
+        raise LookupError(f"Cannot retrieve information for an application named '{name}'.") from e
