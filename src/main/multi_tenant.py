@@ -48,7 +48,9 @@ def remove_subscriber(tenant):
     This only updates the internal list of subscribed tenants.
     """
     global subscribed_tenants
+    global c8yapp
     subscribed_tenants = subscribed_tenants - {tenant}
+    c8yapp.clear_tenant_cache(tenant)
     logging.info(f"Tenant '{tenant}' removed.")
 
 
@@ -65,7 +67,6 @@ def process_subscribers():
 
 # initialize cumulocity
 c8yapp = MultiTenantCumulocityApp()
-c8yapp.clear_user_cache()
 logging.info("CumulocityApp initialized.")
 c8y_bootstrap = c8yapp.bootstrap_instance
 c8y_bootstrap.device_inventory.get_count()
