@@ -12,7 +12,8 @@
     "ROLE_ALARM_ADMIN",
     "ROLE_EVENT_READ",
     "ROLE_EVENT_ADMIN",
-    "ROLE_USER_MANAGEMENT_ADMIN"
+    "ROLE_USER_MANAGEMENT_ADMIN",
+    "ROLE_NOTIFICATION_2_ADMIN"
   ],
   "livenessProbe": {
     "httpGet": {

@@ -1,13 +1,11 @@
 FROM python:3.11-slim
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
-RUN apt-get update
-RUN apt-get -y upgrade
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev
 
-COPY requirements.txt /requirements.txt
-COPY main /main
+COPY main ./main
 
-RUN pip install --upgrade pip
-RUN pip install --root-user-action=ignore --pre c8y_api
-RUN pip install --root-user-action=ignore -r requirements.txt
-
-ENTRYPOINT ["python", "-u", "/main/main.py"]
+EXPOSE 80
+CMD ["uv", "run", "--no-dev", "uvicorn", "main:app", "--app-dir", "main", "--host", "0.0.0.0", "--port", "80"]
