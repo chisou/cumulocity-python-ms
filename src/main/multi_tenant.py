@@ -1,3 +1,4 @@
+# Multi-tenant microservice logging the alarms of all subscribed tenants
 # Copyright (c) 2026 Christoph Souris
 
 import logging
