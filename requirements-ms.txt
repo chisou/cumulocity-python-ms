@@ -1,0 +1,4 @@
+c8y-api
+flask
+apscheduler
+python-dotenv

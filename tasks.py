@@ -1,30 +1,84 @@
 # Copyright (c) 2024 Cumulocity GmbH
 
 import glob
+import logging
 import os
 import sys
+from contextlib import contextmanager
 from datetime import datetime
+import re
+
+import dotenv
 from dunamai import Version
 from invoke import task
-import re
 
 import microservice_util as ms_util
 
 
 def read_file(fn):
     """Read file contents."""
-    with open(fn, 'rt') as fp:
+    with open(fn, 'rt', encoding='utf-8') as fp:
         return fp.readline().strip()
 
 
 def write_file(fn, text):
     """Write file contents."""
-    with open(fn, 'wt') as fp:
+    with open(fn, 'wt', encoding='utf-8') as fp:
         return fp.write(text)
 
 
 MICROSERVICE_NAME = read_file('MICROSERVICE_NAME')
 ISOLATION = read_file('ISOLATION')
+PROVIDER = read_file('PROVIDER')
+
+logger = logging.getLogger()
+
+
+def init_logging(level: str):
+    """Setup local logging configuration."""
+    level = {
+        'd': logging.DEBUG,
+        'i': logging.INFO,
+        'w': logging.WARNING,
+        'e': logging.ERROR,
+    }[level[0]]
+
+    logger.setLevel(level)
+
+    std_formatter = logging.Formatter("%(message)s")
+    std_handler = logging.StreamHandler(sys.stdout)
+    std_handler.setLevel(logging.DEBUG)
+    std_handler.setFormatter(std_formatter)
+    std_handler.addFilter(lambda record: record.levelno < logging.WARNING)
+    logger.addHandler(std_handler)
+
+    err_formatter = logging.Formatter("%(levelname)s: %(message)s")
+    err_handler = logging.StreamHandler(sys.stdout)
+    err_handler.setLevel(logging.WARNING)
+    err_handler.setFormatter(err_formatter)
+    logger.addHandler(err_handler)
+
+
+def limit_string(string: str, length: int = 75):
+    """Truncate/abbreviate long strings."""
+    if len(string) < length:
+        return string
+    return f"{string[:length-11]} ... {string[-5:]}"
+
+
+def assert_name(name):
+    """Verify that a given (microservice) name is valid according to Cumulocity
+    naming standards."""
+    if not re.match(r'[a-zA-Z]+[a-zA-Z0-9\-]+', name):
+        logger.error(f"Provided name ({name}) does not conform to Cumulocity naming standards.")
+        exit(2)
+
+
+def assert_isolation(isolation):
+    """Verify that a given (microservice) isolation is defined."""
+    if isolation not in ['MULTI_TENANT', 'PER_TENANT']:
+        logger.error(f"Provided isolation level ({isolation}) is invalid.")
+        exit(2)
 
 
 def resolve_version():
@@ -44,32 +98,53 @@ def resolve_version():
     return result
 
 
+@contextmanager
+def load_env():
+    """Load Cumulocity environment variables.
+
+    This function will first check, whether environment variables are already
+    present within the environment (e.g. have been loaded by the c8y-go-cli)
+    and use them if available. Alternatively, it will load a .env file
+    if it exists.
+    """
+    c8y_vars = {k: v for k, v in os.environ.items() if k.startswith('C8Y_')}
+    if c8y_vars:
+        logger.info("Found Cumulocity session variables in environment.")
+        for k, v in c8y_vars.items():
+            logger.debug(limit_string(f"  {k}={v}"))
+    if os.path.isfile('.env'):
+        if c8y_vars:
+            logging.warning("Local .env file is ignored because environment variables are defined.")
+        else:
+            logging.info("Local .env file found.")
+            dotenv.load_dotenv()
+
+    yield os.environ
+
+
 @task(help={
     'name': "New name of the microservice. Needs to conform to Cumulocity"
             " naming rules.",
     'isolation': "New isolation level. Needs to be one of MULTI_TENANT or"
-            " SINGLE_TENANT."
+            " PER¶_TENANT.",
+    'loglevel': "Log level. Can be one of: debug, info, warning, error. Defaults to 'info'.",
 })
-def init(c, name=None, isolation=None):
+def init(_, name=None, isolation=None, loglevel="info"):
     """Init the microservice project with name and isolation level.
 
     This sets a default microservice name as it should be represented in
     Cumulocity as well as the isolation level.
     """
-    # (1) Check name pattern (start with a letter followed by any number of
-    #     letters, digits and dashes, no underscores)
-    if name and not re.match(r'[a-zA-Z]+[a-zA-Z0-9\-]+', name):
-        print(f"Provided name ({name}) does not conform to Cumulocity naming standards.", file=sys.stderr)
-        exit(2)
-    if isolation and isolation not in ['MULTI_TENANT', 'PER_TENANT']:
-        print(f"Provided isolation level ({isolation}) is invalid.", file=sys.stderr)
-        exit(2)
-    if name:
-        write_file('MICROSERVICE_NAME', name)
-        print(f'New microservice name written: {name}')
-    if isolation:
-        write_file('ISOLATION', isolation)
-        print(f'New isolation level written: {isolation}')
+    init_logging(loglevel)
+    # Check name pattern (start with a letter followed by any number of letters, digits and dashes, no underscores)
+    name = name or input(f"Enter new name for microservice ({MICROSERVICE_NAME}): ") or MICROSERVICE_NAME
+    assert_name(name)
+    isolation = isolation or input(f"Enter microservice isolation level ({ISOLATION}): ") or ISOLATION
+    assert_isolation(isolation)
+    write_file('MICROSERVICE_NAME', name)
+    logger.info(f'New microservice name written: {name}')
+    write_file('ISOLATION', isolation)
+    logger.info(f'New isolation level written: {isolation}')
 
 
 @task
@@ -79,7 +154,8 @@ def show_version(_):
     This version string is inferred from the last Git tag. A tagged HEAD
     should resolve to a clean semver (vX.Y.Z) version string.
     """
-    print(resolve_version())
+    init_logging('info')
+    logger.info(resolve_version())
 
 
 @task(help={
@@ -88,9 +164,9 @@ def show_version(_):
 def lint(c, scope='all'):
     """Run PyLint."""
     if scope == 'all':
-        paths = " ".join([n for n in glob.glob('src/*') if os.path.isdir(n)])
+        paths = " ".join([n for n in glob.glob('src/*/') if os.path.isdir(n)])
     else:
-        paths = f'src/{scope}'
+        paths = f'src/{scope}/'
     c.run(f'pylint {paths}')
 
 
@@ -98,76 +174,109 @@ def lint(c, scope='all'):
     'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
     "version": "Microservice version. If not provided, defaults to a "
                "generated value based on the last Git tag.",
-    "isolation": "Isolation level, i.e. PER_TENANT or MULTI_TENANT. "
-                 f"Defaults to '{ISOLATION}'."
+    'loglevel': "Log level. Can be one of: debug, info, warning, error. Defaults to 'info'.",
 })
-def build_ms(c, name=MICROSERVICE_NAME, version=None, isolation=ISOLATION):
+def build(c, version=None, name=MICROSERVICE_NAME, loglevel="info"):
     """Build a Cumulocity microservice binary for upload.
 
     This will build a ready to deploy Cumulocity microservice from the
     sources.
     """
+    init_logging(loglevel)
+    assert_name(name)
+    assert_isolation(ISOLATION)
     version = version or resolve_version()
-    # if '-' in version:
-    #     version = version.split('-')[0] + '-b' + BUILD_NO
-    c.run(f'./build.sh {name} {version or resolve_version()} {isolation}')
-    # store new build number
-    # write_file('BUILD_NO', str(int(BUILD_NO) + 1))
+    c.run(f'./build.sh -n {name} -v {version} -i {ISOLATION} -p "{PROVIDER}"')
 
 
 @task(help={
     'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
+    'loglevel': "Log level. Can be one of: debug, info, warning, error. Defaults to 'info'.",
 })
-def register_ms(_, name=MICROSERVICE_NAME):
+def register(_, name=MICROSERVICE_NAME, loglevel='info'):
     """Register a microservice at Cumulocity."""
-    try:
+    init_logging(loglevel)
+    with load_env():
         ms_util.register_microservice(name)
-    except ValueError:
-        print(f"Microservice '{name}' appears to be already registered at Cumulocity.")
 
 
 @task(help={
     'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
+    'loglevel': "Log level. Can be one of: debug, info, warning, error. Defaults to 'info'.",
 })
-def deregister_ms(_, name=MICROSERVICE_NAME):
+def deregister(_, name=MICROSERVICE_NAME, loglevel='info'):
     """Deregister a microservice from Cumulocity."""
-    try:
+    init_logging(loglevel)
+    with load_env():
         ms_util.unregister_microservice(name)
-    except LookupError:
-        print(f"Microservice '{name}' appears not to be registered at Cumulocity.")
+
+
+@task(
+    help={
+        'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
+        "version": "Microservice version. If not provided, defaults to a "
+                   "generated value based on the last Git tag.",
+        'loglevel': "Log level. Can be one of: debug, info, warning, error. Defaults to 'info'.",
+})
+def upload(c, version=None, name=MICROSERVICE_NAME, loglevel='info'):
+    """Build, and upload microservice to Cumulocity."""
+    init_logging(loglevel)
+    build(c, version=version, name=name, loglevel=loglevel)
+    with load_env():
+        ms_util.register_microservice(name)
+        ms_util.upload_microservice(name, f"dist/{name}.zip")
+
+
+
+@task
+def run(c):
+    c.run('python src/main/main.py')
+
+
+def get_env(name, isolation):
+    """Obtain the microservice's environment variables."""
+    # TODO: Do something if not registered, yet
+    if isolation == 'PER_TENANT':
+        return ms_util.get_service_credentials(name)
+    elif isolation == 'MULTI_TENANT':
+        return ms_util.get_bootstrap_credentials(name)
+
+    raise ValueError(f"Unknown isolation: '{isolation}'")
 
 
 @task(help={
     'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
+    'isolation': f"ISOLATION mode. Defaults to '{ISOLATION}'.",
+    'loglevel': "Log level. Can be one of: debug, info, warning, error. Defaults to 'info'.",
 })
-def update_ms(_, name=MICROSERVICE_NAME):
-    """Update microservice at Cumulocity."""
-    try:
-        ms_util.update_microservice(name)
-    except LookupError:
-        print(f"Microservice '{name}' appears not to be registered at Cumulocity.")
-
-
-@task(help={
-    'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
-})
-def get_credentials(_, name=MICROSERVICE_NAME):
+def print_env(_, name=MICROSERVICE_NAME, isolation=ISOLATION, loglevel='info'):
     """Read and print credentials of registered microservice."""
-    _, tenant, user, password = ms_util.get_bootstrap_credentials(name)
-    print(f"Tenant:    {tenant}\n"
-          f"Username:  {user}\n"
-          f"Password:  {password}")
+    init_logging(loglevel)
+    _, tenant, user, password = get_env(name, isolation)
+    logging.info(
+        f"Tenant:    {tenant}\n"
+        f"Username:  {user}\n"
+        f"Password:  {password}"
+    )
 
 
 @task(help={
     'name': f"Microservice name. Defaults to '{MICROSERVICE_NAME}'.",
+    'isolation': f"ISOLATION mode. Defaults to '{ISOLATION}'.",
+    'file': "Force custom environment variables file name; By default .env-ms is used.",
+    'loglevel': "Log level. Can be one of: debug, info, warning, error. Defaults to 'info'.",
 })
-def create_env(_, name=MICROSERVICE_NAME):
-    """Create a .env-ms file to hold the credentials of the microservice
+def write_env(_, name=MICROSERVICE_NAME, isolation=ISOLATION, file=".env-ms", loglevel='info'):
+    """Create a .env file to hold the credentials of the microservice
     registered at Cumulocity."""
-    base_url, tenant, user, password = ms_util.get_bootstrap_credentials(name)
-    with open(f'.env-ms', 'w', encoding='UTF-8') as f:
-        f.write(f'C8Y_BASEURL={base_url}\n'
-                f'C8Y_BOOTSTRAP_TENANT={tenant}\n'
-                f'C8Y_BOOTSTRAP_USER={user}\n'
-                f'C8Y_BOOTSTRAP_PASSWORD={password}\n')
+    init_logging(loglevel)
+    with load_env():
+        base_url, tenant, user, password = get_env(name, isolation)
+        logger.info(f"Writing microservice environment variables to file: {file}")
+        with open(file, 'w', encoding='UTF-8') as f:
+            bootstrap = 'BOOTSTRAP_' if ISOLATION == 'MULTI_TENANT' else ''
+            f.write(f'C8Y_BASEURL={base_url}\n'
+                    f'C8Y_{bootstrap}TENANT={tenant}\n'
+                    f'C8Y_{bootstrap}USER={user}\n'
+                    f'C8Y_{bootstrap}PASSWORD={password}\n')
+

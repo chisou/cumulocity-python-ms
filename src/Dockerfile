@@ -1,11 +1,11 @@
-FROM python:3.10-slim
+FROM python:3.11-slim
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
-RUN apt-get update && apt-get -y upgrade
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --locked --no-dev
 
-COPY requirements.txt /
-COPY main /main
+COPY main ./main
 
-RUN pip install --upgrade pip
-RUN pip install -r requirements.txt
-
-ENTRYPOINT ["python", "-u", "/main/main.py"]
+EXPOSE 80
+CMD ["uv", "run", "--no-dev", "uvicorn", "main:app", "--app-dir", "main", "--host", "0.0.0.0", "--port", "80"]
