@@ -136,6 +136,9 @@ sed -i.bak \
     pyproject.toml
 rm pyproject.toml.bak
 
+# uv.lock records the project name too; `uv sync --locked` (Dockerfile) fails if it's outdated
+uv lock --quiet
+
 # LICENSE, README, CHANGELOG
 sed -e "s|{YEAR}|$(date +%Y)|" \
     -e "s|{PROVIDER}|$sed_provider|" \

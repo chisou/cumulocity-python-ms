@@ -124,6 +124,7 @@ assert project["name"] == "test-ms"
 assert project["authors"][0]["name"] == sys.argv[1]
 assert project["description"] == sys.argv[2]
 EOF
+uv lock --check --quiet 2> /dev/null || fail "uv.lock is out of date"
 grep -qF -- "$provider" LICENSE || fail "LICENSE has no provider"
 grep -qF -- "$description" README.md || fail "README.md has no description"
 grep -q '{NAME}\|{YEAR}\|{PROVIDER}\|{DESCRIPTION}' README.md LICENSE && fail "placeholders left"
