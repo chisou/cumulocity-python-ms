@@ -7,7 +7,8 @@ single-tenant example and `just` commands to register, run, build and deploy the
 ## Getting started
 
 You need [uv](https://docs.astral.sh/uv/), [just](https://just.systems) and
-[Docker](https://www.docker.com) with `buildx`.
+[Docker](https://www.docker.com) with `buildx`. On Apple Silicon, Docker also needs amd64
+emulation (see the prerequisites in [.template/README.md](.template/README.md)).
 
 1. Create your own repository from this template, either with the **Use this template** button
    on GitHub or with the GitHub CLI:

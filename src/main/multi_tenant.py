@@ -1,89 +1,55 @@
-# Standard multi-tenant microservice example with N2.0 subscriptions
+# Multi-tenant microservice example with user access and a periodic background task
 # Copyright (c) 2026 Christoph Souris
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Request
-from pyc8y import MultiTenantCumulocityApp
-from pyc8y.model import Subscription
-from pyc8y.notification2 import Listener
-from pyc8y.notification2.listener import Message
+from fastapi import FastAPI, HTTPException, Request
+from pyc8y import AccessDeniedError, MultiTenantCumulocityApp
 
-# A multi-tenant Cumulocity application that, for every subscribed tenant,
-# creates a Notification 2.0 subscription for alarms raised on any of the
-# tenant's devices and logs them. Subscriptions are set up when a tenant
-# subscribes and torn down when it unsubscribes or the service shuts down.
+# A multi-tenant Cumulocity application. It is subscribed to many tenants and
+# accesses Cumulocity in two ways:
+# - as the service user of each subscribed tenant, obtained via the bootstrap
+#   user in the C8Y_BOOTSTRAP_* environment variables, e.g. for the periodic
+#   background task below
+# - on behalf of the calling user, using the user's own credentials from the
+#   request, so that the user's permissions apply (see /user and /events)
 
-# override=True: the MS service user must win over any admin credentials
+# override=True: the MS bootstrap user must win over any admin credentials
 # already present in the environment (e.g. from an active c8y-cli session).
 load_dotenv(".env-ms", override=True)
 
 logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(levelname)s - %(name)s - %(message)s")
 log = logging.getLogger("service")
 
-SUBSCRIPTION_NAME = "sampleAlarmSubscription"
+PROCESSING_INTERVAL = 300  # seconds
 
 
-async def log_alarm(message: Message) -> None:
-    """Log every alarm notification as it comes in."""
-    log.debug("Alarm raised: %s", message.json)
+async def process_devices(c8y: MultiTenantCumulocityApp) -> None:
+    """Background task, processing all devices of all subscribed tenants periodically."""
+    while True:
+        try:
+            for tenant_id in await c8y.get_subscribers():
+                tenant_c8y = await c8y.get_tenant_instance(tenant_id)
+                for device in await tenant_c8y.device_inventory.get_all(limit=None):
+                    log.info("Processing device '%s' (%s) of tenant '%s' ...", device.name, device.id, tenant_id)
+        except Exception:  # keep the task alive, try again next time
+            log.exception("Processing devices failed.")
+        await asyncio.sleep(PROCESSING_INTERVAL)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
-    app.state.bootstrap_app = MultiTenantCumulocityApp()
-    app.state.alarm_subscriptions = {}
-    app.state.alarm_listeners = {}
-
-    async def on_tenant_subscribed(tenant_id: str) -> None:
-        """Subscribe to alarms of all devices of a newly subscribed tenant."""
-        client = await app.state.bootstrap_app.get_tenant_instance(tenant_id)
-        subscriptions = await client.subscriptions.get_all(subscription=SUBSCRIPTION_NAME)
-        if subscriptions:
-            # TODO: Better recreate, proper cleanup
-            subscription = subscriptions[0]
-        else:
-            subscription = await Subscription(
-                client,
-                name=SUBSCRIPTION_NAME,
-                context=Subscription.Context.TENANT,
-                api_filter=[Subscription.ApiFilter.ALARMS],
-            ).create()
-
-        listener = Listener(client, subscription_name=SUBSCRIPTION_NAME)
-        listener.start(log_alarm)
-
-        app.state.alarm_subscriptions[tenant_id] = subscription
-        app.state.alarm_listeners[tenant_id] = listener
-        log.info("Subscribed to alarms for tenant '%s'.", tenant_id)
-
-    async def on_tenant_unsubscribed(tenant_id: str) -> None:
-        """Remove the alarm subscription of a tenant that unsubscribed."""
-        listener = app.state.alarm_listeners.pop(tenant_id, None)
-        if listener:
-            listener.stop()
-            await listener.wait()
-
-        subscription = app.state.alarm_subscriptions.pop(tenant_id, None)
-        if subscription:
-            await subscription.delete()
-
-        log.info("Removed alarm subscription for tenant '%s'.", tenant_id)
-
-    subscription_listener = app.state.bootstrap_app.create_subscription_listener()
-    subscription_listener.on_add(on_tenant_subscribed)
-    subscription_listener.on_remove(on_tenant_unsubscribed)
-    subscription_listener.start()
+    app.state.c8y = MultiTenantCumulocityApp()
+    processing = asyncio.create_task(process_devices(app.state.c8y))
 
     yield
 
-    subscription_listener.stop()
-    for tenant_id in list(app.state.alarm_listeners):
-        await on_tenant_unsubscribed(tenant_id)
-    await app.state.bootstrap_app.close()
+    processing.cancel()
+    await app.state.c8y.close()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -94,9 +60,27 @@ async def get_health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/alarms")
-async def get_alarms(request: Request) -> list[dict]:
-    """List all open (i.e. not yet cleared) alarms of the calling tenant."""
-    client = await app.state.bootstrap_app.get_tenant_instance(headers=request.headers, cookies=request.cookies)
-    alarms = await client.alarms.get_all(resolved="false", limit=None)
-    return [{"id": a.id, "type": a.type, "text": a.text, "severity": a.severity, "status": a.status} for a in alarms]
+@app.get("/user")
+async def get_user(request: Request) -> dict:
+    """Return the calling user's tenant and name and the devices they have access to."""
+    user_c8y = await app.state.c8y.get_user_instance(headers=request.headers, cookies=request.cookies)
+    devices = await user_c8y.device_inventory.get_all(limit=None)
+    return {
+        "tenant": user_c8y.tenant_id,
+        "username": user_c8y.username,
+        "devices": [{"id": d.id, "name": d.name, "type": d.type} for d in devices],
+    }
+
+
+@app.get("/events/{device_id}")
+async def get_events(device_id: str, request: Request) -> list[dict]:
+    """List the 10 latest events of a device, if the calling user has access to it."""
+    user_c8y = await app.state.c8y.get_user_instance(headers=request.headers, cookies=request.cookies)
+    try:
+        await user_c8y.device_inventory.get(device_id)
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=f"No such device: {device_id}") from e
+    except AccessDeniedError as e:
+        raise HTTPException(status_code=403, detail=f"No access to device: {device_id}") from e
+    events = await user_c8y.events.get_all(source=device_id, limit=10)
+    return [{"id": e.id, "time": e.time, "type": e.type, "text": e.text} for e in events]

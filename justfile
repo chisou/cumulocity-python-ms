@@ -31,7 +31,10 @@ build version='':
     set -eu
     version="{{version}}"
     if [ -z "$version" ]; then
-        distance=$(git rev-list --count HEAD)
+        if ! distance=$(git rev-list --count HEAD 2> /dev/null); then
+            echo "No Git history to derive a version from. Please pass one, e.g.: just build 1.0.0" >&2
+            exit 2
+        fi
         version="0.0.0-c$(printf '%02d' "$distance")"
         if [ -n "$(git status --porcelain)" ]; then
             version="${version}-r$(date +%y%m%d%H%M)"

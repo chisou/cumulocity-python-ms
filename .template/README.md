@@ -9,7 +9,11 @@ and [pyc8y](https://github.com/chisou/cumulocity-python-sdk).
 
 - [uv](https://docs.astral.sh/uv/) for Python and dependencies
 - [just](https://just.systems) for the project commands
-- [Docker](https://www.docker.com) with `buildx` for building the microservice image
+- [Docker](https://www.docker.com) with `buildx` for building the microservice image.
+  Cumulocity runs `linux/amd64` images, so on Apple Silicon (or any ARM machine) Docker
+  needs amd64 emulation, e.g. Rosetta in Docker Desktop or Colima (`colima start --vz-rosetta`).
+  Check with `docker run --rm --platform linux/amd64 python:3.11-slim uname -m`, which should
+  print `x86_64`. If it fails with `exec format error`, `just build` will fail as well.
 - A Cumulocity tenant and a user that can manage applications
 
 ## Setup
@@ -51,6 +55,7 @@ To remove the microservice from Cumulocity again, use `just deregister`.
 
 ```sh
 just build     # builds dist/<name>.zip, versioned from Git
+just build 1.0.0   # ... or with an explicit version (needed without Git history)
 just deploy    # uploads the package to Cumulocity
 ```
 
