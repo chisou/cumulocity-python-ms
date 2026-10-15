@@ -1,4 +1,4 @@
-# Multi-tenant microservice logging the alarms of all subscribed tenants
+# Standard multi-tenant microservice example with N2.0 subscriptions
 # Copyright (c) 2026 Christoph Souris
 
 import logging

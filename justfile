@@ -11,10 +11,11 @@ _default:
     @echo "Variables: port={{port}}"
     @just --list
 
-# Turn this template into your own project (run once, right after creating it)
-init:
+# Turn this template into your own project (run once, right after creating it; see: just init --help)
+[positional-arguments]
+init *args:
     @test -d .template || { echo "Project is already initialized." >&2; exit 1; }
-    @bash .template/init.sh
+    @bash .template/init.sh "$@"
 
 # Register microservice at Cumulocity (needs environment credentials)
 register:

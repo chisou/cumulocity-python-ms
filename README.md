@@ -26,7 +26,14 @@ You need [uv](https://docs.astral.sh/uv/), [just](https://just.systems) and
    ```
 
    This asks for a name, provider, description, which example to start from, the
-   isolation (`MULTI_TENANT` or `PER_TENANT`) and a license. It then:
+   isolation (`MULTI_TENANT` or `PER_TENANT`) and a license. You can also give some or
+   all of them as options, and are then only asked for the rest (see `just init --help`):
+
+   ```sh
+   just init --name my-microservice --provider "ACME Corp" --license MIT
+   ```
+
+   It then:
 
    - writes `MICROSERVICE_NAME`, `PROVIDER` and `ISOLATION`,
    - keeps the chosen example as `src/main/main.py` and removes the others,
@@ -66,13 +73,17 @@ itself. Use `test-init.sh` instead: it runs `just init` on a temporary copy of t
 template and checks the result.
 
 ```sh
-.template/test-init.sh                                # multi_tenant, MULTI_TENANT, ASL2
-.template/test-init.sh simple_tenant PER_TENANT MIT   # example, isolation, license
+.template/test-init.sh                                     # multi_tenant, MULTI_TENANT, ASL2
+.template/test-init.sh -e simple_tenant -i PER_TENANT -l MIT
 ```
 
-It copies all files git knows about (including uncommitted changes, but not ignored
-files like `.venv` or `.env`), answers the questions with fixed values, and checks that:
+Run `.template/test-init.sh --help` for all options.
 
+It copies all files git knows about (including uncommitted changes, but not ignored
+files like `.venv` or `.env`), runs `just init` with all values given as options, and
+checks that:
+
+- invalid microservice names are rejected before any file is changed,
 - `.template/` was removed,
 - `src/main` only contains `main.py`, and it is the chosen example,
 - `MICROSERVICE_NAME`, `ISOLATION` and the name in `pyproject.toml` are set,
@@ -85,14 +96,16 @@ failed check and keeps the folder so you can look at the result. To test all
 examples, run it in a loop:
 
 ```sh
-for e in multi_tenant simple_tenant; do .template/test-init.sh $e; done
+for e in multi_tenant simple_tenant; do .template/test-init.sh -e $e; done
 ```
 
-To see what users see, run it with `-i`. You then answer the questions yourself; nothing
-is checked, and the generated project is kept so you can look at it:
+To see what users see, run it with `--interactive` (`-I`). You then answer the questions
+yourself; nothing is checked, and the generated project is kept so you can look at it.
+Options you give are passed on, so you're only asked for the rest:
 
 ```sh
-.template/test-init.sh -i
+.template/test-init.sh --interactive
+.template/test-init.sh --interactive --license MIT
 ```
 
 The test only checks the files `init` writes. It doesn't check whether the
