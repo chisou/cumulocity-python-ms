@@ -23,8 +23,8 @@ Usage: .template/test-init.sh [options]
 Runs \`just init\` on a temporary copy of the template and checks the result.
 
 Options:
-  -e, --example <example>          Example to test, a file name in src/main without .py
-                                   (default: multi_tenant)
+  -e, --example <example>          Example to test, a folder name in src/app
+                                   (default: advanced)
   -i, --isolation <isolation>      MULTI_TENANT or PER_TENANT (default: MULTI_TENANT)
   -l, --license <license>          ASL2, MIT, BSD3 or GPL3 (default: ASL2)
   -I, --interactive                Let \`just init\` ask you for every value not given as
@@ -36,7 +36,7 @@ Examples:
   .template/test-init.sh
   .template/test-init.sh -e simple_tenant -i PER_TENANT -l MIT
   .template/test-init.sh --interactive
-  for e in multi_tenant simple_tenant; do .template/test-init.sh -e \$e; done
+  for e in advanced multi_tenant multi_tenant_n20 simple_tenant; do .template/test-init.sh -e \$e; done
 EOF
 }
 
@@ -63,7 +63,9 @@ done
 cd "$(dirname "$0")/.."
 template="$(pwd)"
 dir="$(mktemp -d)"
-git ls-files -co --exclude-standard | tar -cf - -T - | tar -xf - -C "$dir"
+# (files deleted but not yet committed are still known to git, but can't be copied)
+git ls-files -co --exclude-standard | while IFS= read -r f; do [ -e "$f" ] && echo "$f"; done \
+    | tar -cf - -T - | tar -xf - -C "$dir"
 cd "$dir"
 
 if $interactive; then
@@ -78,7 +80,7 @@ if $interactive; then
     exit 0
 fi
 
-example="${example:-multi_tenant}"
+example="${example:-advanced}"
 isolation="${isolation:-MULTI_TENANT}"
 license="${license:-ASL2}"
 
@@ -112,8 +114,22 @@ just init \
     < /dev/null > /dev/null || fail "just init failed"
 
 [ -e .template ] && fail ".template still exists"
-[ "$(ls src/main/*.py)" = "src/main/main.py" ] || fail "src/main should only contain main.py"
-cmp -s src/main/main.py "$template/src/main/$example.py" || fail "main.py is not $example.py"
+[ -f src/app/main.py ] || fail "src/app/main.py missing"
+[ -z "$(find src/app -mindepth 1 -maxdepth 1 -name README.md)" ] || fail "example README.md was not removed"
+for other in "$template"/src/app/*/; do
+    other="$(basename "$other")"
+    [ "$other" = "__pycache__" ] || [ "$other" = "$example" ] || [ ! -e "src/app/$other" ] \
+        || fail "example $other was not removed"
+done
+[ ! -e "src/app/$example" ] || fail "example folder was not flattened"
+sed "s/app\.$example\([. ]\)/app\1/g" "$template/src/app/$example/main.py" | cmp -s - src/app/main.py \
+    || fail "main.py is not the main.py of $example"
+grep -rq "app\.$example" src/app && fail "imports still name the example"
+# the project must import without the template (needs the template's .venv)
+if [ -x "$template/.venv/bin/python" ]; then
+    (cd src && "$template/.venv/bin/python" -c "import app.main") > /dev/null 2>&1 \
+        || fail "src/app/main.py can't be imported"
+fi
 [ "$(cat MICROSERVICE_NAME)" = "test-ms" ] || fail "MICROSERVICE_NAME not set"
 [ "$(cat PROVIDER)" = "$provider" ] || fail "PROVIDER not set"
 [ "$(cat ISOLATION)" = "$isolation" ] || fail "ISOLATION should be $isolation"

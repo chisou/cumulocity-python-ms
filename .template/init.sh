@@ -25,7 +25,7 @@ Options:
                                    23 characters (default: folder name)
   -p, --provider <provider>        Provider, i.e. your company
   -d, --description <text>         Short description
-  -e, --example <example>          Example to start from, a file name in src/main without .py
+  -e, --example <example>          Example to start from, a folder name in src/app
   -i, --isolation <isolation>      MULTI_TENANT or PER_TENANT (default: MULTI_TENANT)
   -l, --license <license>          ASL2, MIT, BSD3 or GPL3 (default: ASL2)
   -h, --help                       Show this help
@@ -55,10 +55,67 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# every src/main/*.py except main.py is an example; its first line describes it
+# choose <prompt> <default> <item>...: lets the user pick one item, sets $choice.
+# An item is "value" or "value|description". On a terminal, the user picks with
+# up/down (or k/j) and Enter; without a capable terminal (e.g. in scripts) the value is typed.
+choose() {
+    local prompt="$1" default="$2"
+    shift 2
+    local items=("$@") n=$# selected=0 i value key rest
+
+    if ! [ -t 0 ] || ! [ -t 1 ] || [ "${TERM:-dumb}" = "dumb" ]; then
+        echo "${cc}${prompt}:${nc}"
+        for item in "${items[@]}"; do
+            printf "  ${cy}%-20s${nc} %s\n" "${item%%|*}" "${item#*|}"
+        done
+        read -p "${cc}${prompt} [$default]:${nc} " choice || true
+        choice="${choice:-$default}"
+        return
+    fi
+
+    for ((i = 0; i < n; i++)); do
+        [ "${items[i]%%|*}" = "$default" ] && selected=$i
+    done
+
+    echo "${cc}${prompt}${nc} (up/down, Enter)"
+    printf '\033[?25l'  # hide cursor, show it again when done or interrupted
+    trap 'printf "\033[?25h\n"; exit 130' INT
+    while true; do
+        for ((i = 0; i < n; i++)); do
+            value="${items[i]%%|*}"
+            if [ "$i" -eq "$selected" ]; then
+                printf "\033[2K  ${cy}> %-20s${nc} %s\n" "$value" "${items[i]#*|}"
+            else
+                printf "\033[2K    %-20s %s\n" "$value" "${items[i]#*|}"
+            fi
+        done
+        IFS= read -rsn1 key || { printf '\033[?25h\n'; exit 130; }
+        case "$key" in
+            "")   break ;;  # Enter
+            k)    [ "$selected" -gt 0 ] && selected=$((selected - 1)) ;;
+            j)    [ "$selected" -lt $((n - 1)) ] && selected=$((selected + 1)) ;;
+            $'\033')  # arrow keys arrive as ESC [ A / ESC [ B (or ESC O A / ESC O B in application mode)
+                IFS= read -rsn2 rest || true
+                case "$rest" in
+                    "[A"|"OA") [ "$selected" -gt 0 ] && selected=$((selected - 1)) ;;
+                    "[B"|"OB") [ "$selected" -lt $((n - 1)) ] && selected=$((selected + 1)) ;;
+                esac ;;
+        esac
+        printf "\033[%dA" "$n"  # back to the first item for redrawing
+    done
+    trap - INT
+    choice="${items[selected]%%|*}"
+
+    # collapse the menu to the chosen value
+    printf "\033[%dA\033[J\033[?25h" $((n + 1))
+    echo "${cc}${prompt}:${nc} $choice"
+}
+
+# every folder in src/app with a main.py is an example; the first line of its
+# README.md (without the leading "# ") describes it
 examples=()
-for f in src/main/*.py; do
-    [ "$(basename "$f" .py)" = "main" ] || examples+=("$(basename "$f" .py)")
+for d in src/app/*/; do
+    [ -f "${d}main.py" ] && examples+=("$(basename "$d")")
 done
 
 # ask for everything not given as option, check each value before changing anything
@@ -74,18 +131,20 @@ fi
 [ -n "$provider" ] || read -p "${cc}Provider (your company):${nc} " provider
 [ -n "$description" ] || read -p "${cc}Short description:${nc} " description
 if [ -z "$example" ]; then
-    echo "${cc}Available examples:${nc}"
+    items=()
     for e in "${examples[@]}"; do
-        printf "  ${cy}%-20s${nc} %s\n" "$e" "$(head -1 "src/main/$e.py" | sed 's/^# *//')"
+        items+=("$e|$(head -n 1 "src/app/$e/README.md" | sed 's/^# *//')")
     done
-    read -p "${cc}Example to start from [${examples[0]}]:${nc} " example
-    example="${example:-${examples[0]}}"
+    choose "Example to start from" multi_tenant "${items[@]}"
+    example="$choice"
 fi
-[ -f "src/main/$example.py" ] && [ "$example" != "main" ] || { echo "${cr}Unknown example: $example${nc}" >&2; exit 2; }
+[ -f "src/app/$example/main.py" ] || { echo "${cr}Unknown example: $example${nc}" >&2; exit 2; }
 
 if [ -z "$isolation" ]; then
-    read -p "${cc}Isolation? [MULTI_TENANT/PER_TENANT]:${nc} " isolation
-    isolation="${isolation:-MULTI_TENANT}"
+    choose "Isolation" MULTI_TENANT \
+        "MULTI_TENANT|One instance serves all subscribed tenants" \
+        "PER_TENANT|One instance per subscribed tenant"
+    isolation="$choice"
 fi
 case "$isolation" in
     MULTI_TENANT|PER_TENANT) ;;
@@ -93,8 +152,12 @@ case "$isolation" in
 esac
 
 if [ -z "$license" ]; then
-    read -p "${cc}License? [ASL2/MIT/BSD3/GPL3]:${nc} " license
-    license="${license:-ASL2}"
+    choose "License" ASL2 \
+        "ASL2|Apache License 2.0" \
+        "MIT|MIT License" \
+        "BSD3|BSD 3-Clause License" \
+        "GPL3|GNU General Public License v3"
+    license="$choice"
 fi
 case "$license" in
     ASL2) classifier="Apache Software License" ;;
@@ -109,11 +172,20 @@ echo "$name" > MICROSERVICE_NAME
 echo "$provider" > PROVIDER
 echo "$isolation" > ISOLATION
 
-# entrypoint: chosen example becomes main.py, the others go
-mv "src/main/$example.py" src/main/main.py
+# the chosen example becomes the app itself: its files move up into src/app
+# (replacing main.py, which only selects an example), the others go
+find src/app -name __pycache__ -prune -exec rm -r {} +
+rm src/app/main.py
 for other in "${examples[@]}"; do
-    [ "$other" = "$example" ] || rm "src/main/$other.py"
+    [ "$other" = "$example" ] || rm -r "src/app/$other"
 done
+mv -f "src/app/$example"/* src/app/
+rmdir "src/app/$example"
+rm src/app/README.md
+
+# the example's imports name it (app.<example>.x), the project's don't (app.x)
+find src/app -name '*.py' -exec sed -i.bak "s/app\.$example\([. ]\)/app\1/g" {} +
+find src/app -name '*.bak' -delete
 
 # user values go into sed replacements (where \, | and & are special) and
 # into TOML strings (where \ and " are special), so they need escaping

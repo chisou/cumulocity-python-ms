@@ -68,7 +68,7 @@ mkdir -p "$build_dir" "$dist_dir"
 
 # --- Copy & render sources (portable sed) ---
 cp ./pyproject.toml ./uv.lock "$build_dir"
-cp -r src/main "$build_dir"
+cp -r src/app "$build_dir"
 cp ./src/cumulocity.json "$build_dir/cumulocity.json"
 cp ./src/Dockerfile "$build_dir/Dockerfile"
 

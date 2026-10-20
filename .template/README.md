@@ -65,7 +65,7 @@ Run `just` to see all available commands.
 
 | Path                  | Purpose                                                  |
 |-----------------------|----------------------------------------------------------|
-| `src/main/main.py`    | The microservice itself                                   |
+| `src/app/`            | The microservice (`main.py` creates the FastAPI app)      |
 | `src/cumulocity.json` | Microservice manifest (required roles, health probe, ...) |
 | `src/Dockerfile`      | Image definition used by `just build`                     |
 | `MICROSERVICE_NAME`, `PROVIDER`, `ISOLATION` | Microservice settings used by `just` |

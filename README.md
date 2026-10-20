@@ -1,8 +1,8 @@
 # Cumulocity Python Microservice Template
 
 A template for building Cumulocity microservices in Python, using [FastAPI](https://fastapi.tiangolo.com)
-and [pyc8y](https://github.com/chisou/cumulocity-python-sdk). It comes with a multi-tenant and a
-single-tenant example and `just` commands to register, run, build and deploy the microservice.
+and [pyc8y](https://github.com/chisou/cumulocity-python-sdk). It comes with several examples (single-tenant,
+multi-tenant, Notification 2.0 subscriptions, and a structured one with background tasks) and `just` commands to register, run, build and deploy the microservice.
 
 ## Getting started
 
@@ -27,7 +27,8 @@ emulation (see the prerequisites in [.template/README.md](.template/README.md)).
    ```
 
    This asks for a name, provider, description, which example to start from, the
-   isolation (`MULTI_TENANT` or `PER_TENANT`) and a license. You can also give some or
+   isolation (`MULTI_TENANT` or `PER_TENANT`) and a license. The example, isolation and license are
+   picked from a menu with the arrow keys (or `j`/`k`) and Enter. You can also give some or
    all of them as options, and are then only asked for the rest (see `just init --help`):
 
    ```sh
@@ -37,7 +38,7 @@ emulation (see the prerequisites in [.template/README.md](.template/README.md)).
    It then:
 
    - writes `MICROSERVICE_NAME`, `PROVIDER` and `ISOLATION`,
-   - keeps the chosen example as `src/main/main.py` and removes the others,
+   - moves the chosen example's files into `src/app/` (so `src/app/main.py` is your service) and removes the others,
    - updates name, description, author and license classifier in `pyproject.toml`,
    - writes `LICENSE`, `README.md` and a fresh `CHANGELOG.md`,
    - removes the template-only files in `.template/`.
@@ -48,14 +49,18 @@ Your new `README.md` explains how to register, run, build and deploy the microse
 
 ## Working on the template
 
-The template itself is a runnable project: `src/main/main.py` imports the multi-tenant
+The template itself is a runnable project: `src/app/main.py` only imports the `app` of one
 example, so `just register`, `just serve`, `just build` and `just deploy` work as described
-in [.template/README.md](.template/README.md). Change it to import `simple_tenant`
-to try the single-tenant example.
+in [.template/README.md](.template/README.md). Change that import to try another example, e.g.
+`from app.simple_tenant.main import app`.
 
-Every file in `src/main` except `main.py` is an example that `just init` offers. The file
-name without `.py` is its name, and its first line (a comment) is the description shown
-to the user. To add an example, add a file there and start it with a one-line comment.
+Every folder in `src/app` is an example that `just init` offers. It contains a `main.py`
+that creates the `app`, an `__init__.py`, and a `README.md` whose first line (a `# ` heading)
+is the description shown to the user. Examples import their own modules absolutely, e.g.
+`from app.advanced.state import AppState`. To add an example, add such a folder.
+
+`just init` moves the chosen example's files up into `src/app/` and rewrites `app.<example>`
+in the imports to `app`, so the project looks like it was never an example.
 
 Files in `.template/` are only used by `just init`, which deletes the folder when done:
 
@@ -74,7 +79,7 @@ itself. Use `test-init.sh` instead: it runs `just init` on a temporary copy of t
 template and checks the result.
 
 ```sh
-.template/test-init.sh                                     # multi_tenant, MULTI_TENANT, ASL2
+.template/test-init.sh                                     # advanced, MULTI_TENANT, ASL2
 .template/test-init.sh -e simple_tenant -i PER_TENANT -l MIT
 ```
 
@@ -86,7 +91,8 @@ checks that:
 
 - invalid microservice names are rejected before any file is changed,
 - `.template/` was removed,
-- `src/main` only contains `main.py`, and it is the chosen example,
+- the chosen example was moved up into `src/app` (imports rewritten, other examples and
+  READMEs gone) and can be imported,
 - `MICROSERVICE_NAME`, `ISOLATION` and the name in `pyproject.toml` are set,
 - `LICENSE` contains the provider and no placeholders are left in `LICENSE` or `README.md`,
 - `CHANGELOG.md` was written,
@@ -97,7 +103,7 @@ failed check and keeps the folder so you can look at the result. To test all
 examples, run it in a loop:
 
 ```sh
-for e in multi_tenant simple_tenant; do .template/test-init.sh -e $e; done
+for e in advanced multi_tenant multi_tenant_n20 simple_tenant; do .template/test-init.sh -e $e; done
 ```
 
 To see what users see, run it with `--interactive` (`-I`). You then answer the questions

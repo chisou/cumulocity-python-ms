@@ -49,7 +49,7 @@ deploy:
 # Locally serve microservice (must be registered beforehand)
 serve:
     echo "Running previously registered microservice (see: just register)..."
-    uv run uvicorn main:app --app-dir src/main --port {{port}} --reload
+    uv run uvicorn app.main:app --app-dir src --port {{port}} --reload
 
 # Perform a GET to locally running microservice (example: just get /health)
 get path:

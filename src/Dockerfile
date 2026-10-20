@@ -12,7 +12,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev
 
-COPY main ./main
+COPY app ./app
 
 # --- Runtime ---
 FROM python:3.11-slim AS runtime
@@ -29,4 +29,4 @@ COPY --from=builder --chown=app:app /app /app
 USER app
 
 EXPOSE 80
-CMD ["uvicorn", "main:app", "--app-dir", "main", "--host", "0.0.0.0", "--port", "80"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "80"]
